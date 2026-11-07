@@ -49,6 +49,10 @@ export async function send(contract, method, args, tgas, deposit = 0n) {
 // call `ignite` on this coin lets the page submit the lung itself and move on. It lives in this
 // browser, can't move NEAR or tokens, and its gas allowance is capped.
 
+// Prepaid gas is bought at 0.001 NEAR per TGas, so a full lung needs just over 1 NEAR of allowance
+// even though only about 0.1 NEAR is finally burned. The rest is refunded breath by breath.
+const SESSION_ALLOWANCE = (NEAR * 3n) / 2n;
+
 const sessionName = (accountId, coin) => `gasbag.session.${accountId}.${coin}`;
 
 function readSession(accountId, coin) {
@@ -62,7 +66,7 @@ function readSession(accountId, coin) {
 export const hasSession = (accountId, coin) => Boolean(readSession(accountId, coin));
 
 async function authorise(accountId, coin) {
-  const pair = KeyPair.fromRandom();
+  const pair = KeyPair.fromRandom("ed25519");
   const wallet = await connector.wallet();
   await wallet.signAndSendTransaction({
     receiverId: accountId,
@@ -71,7 +75,7 @@ async function authorise(accountId, coin) {
         type: "AddKey",
         params: {
           publicKey: pair.getPublicKey().toString(),
-          accessKey: { permission: { receiverId: coin, allowance: NEAR.toString(), methodNames: ["ignite"] } },
+          accessKey: { permission: { receiverId: coin, allowance: SESSION_ALLOWANCE.toString(), methodNames: ["ignite"] } },
         },
       },
     ],

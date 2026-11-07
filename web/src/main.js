@@ -3,7 +3,7 @@ import { BEAT_BLOCKS, EXPLORER, GAS_PRICE_NEAR_PER_TGAS, HATCHERY, MAIN_COIN, MA
 import { liveChain } from "./chain.js";
 import { mockChain } from "./mock.js";
 import { drawEcg } from "./ecg.js";
-import { clock, compact, nearText, parseNear, shortAccount, spanText, tokenText, tokensFor } from "./format.js";
+import { breathsLeft, clock, compact, nearText, parseNear, shortAccount, spanText, tokenText, tokensFor } from "./format.js";
 import { line } from "./lines.js";
 import { petMarkup, puff, setPet } from "./pet.js";
 
@@ -59,9 +59,11 @@ function fullness() {
   return Math.max(0, (left / Number(vitals.grace_blocks)) * 0.2);
 }
 
+const breathsFor = (fuel) => (rules ? breathsLeft(fuel, Number(vitals.age_blocks), rules) : 0);
+
 function bestFuelBreaths() {
   if (!lungs.length) return 0;
-  return Math.max(...lungs.map(([, l]) => Math.floor(l.fuel_tgas / Number(vitals.breath_tgas))));
+  return Math.max(...lungs.map(([, l]) => breathsFor(l.fuel_tgas)));
 }
 
 // Second-by-second clocks, between chain reads.
@@ -101,10 +103,8 @@ function renderVitals(v) {
   set("wages", tokenText(v.wages));
   set("burned-near", nearText(BigInt(v.gas_burned) * BigInt(Math.round(GAS_PRICE_NEAR_PER_TGAS * 1e12)), 4));
 
-  const tgas = Number(v.breath_tgas);
-  const breaths = Math.floor(MAX_TX_TGAS / tgas);
-  set("lung-life", spanText(breaths * BEAT_BLOCKS));
-  set("lung-cost", `up to ${(MAX_TX_TGAS * GAS_PRICE_NEAR_PER_TGAS).toFixed(2)} NEAR`);
+  set("lung-life", spanText(breathsFor(MAX_TX_TGAS) * BEAT_BLOCKS));
+  set("lung-cost", `${(MAX_TX_TGAS * GAS_PRICE_NEAR_PER_TGAS).toFixed(2)} NEAR`);
   set("lung-wage", `your share of ${(Number(rules?.wage_bps_per_day ?? 0) / 100).toFixed(2)}% a day`);
 
   $("ignite").disabled = v.status === "dead";
@@ -120,7 +120,6 @@ function renderLungs(list) {
   const host = $("lungs");
   host.replaceChildren();
   $("lungs-empty").hidden = list.length > 0;
-  const perBreath = vitals ? Number(vitals.breath_tgas) : 1;
   for (const [owner, lung] of list) {
     const li = document.createElement("li");
     li.className = "lung";
@@ -131,7 +130,7 @@ function renderLungs(list) {
     name.textContent = shortAccount(owner, 34);
     const eta = document.createElement("span");
     eta.className = "lung-eta";
-    eta.textContent = `${lung.breaths} breaths, ${spanText(Math.floor(lung.fuel_tgas / perBreath) * BEAT_BLOCKS)} left`;
+    eta.textContent = `${lung.breaths} breaths, ${spanText(breathsFor(lung.fuel_tgas) * BEAT_BLOCKS)} left`;
     top.append(name, eta);
     const meter = document.createElement("div");
     meter.className = "meter";
@@ -281,27 +280,35 @@ async function renderUser() {
   $("ignite").textContent = lung ? "Your lung is running" : "Start a lung";
 }
 
+let lastLog = [];
+let polls = 0;
+
+// Public RPCs rate-limit, so only the vitals are read every time. The heavier reads wait until
+// something has changed, or for a periodic catch-up.
 async function refresh() {
   try {
-    const [v, l, log, speech] = await Promise.all([
-      chain.view(coin, "vitals"),
-      chain.view(coin, "lungs", {}),
-      chain.view(coin, "log", { limit: 128 }),
-      chain.view(coin, "speech", { limit: 1 }).catch(() => []),
-    ]);
+    const v = await chain.view(coin, "vitals");
+    const changed = !vitals || v.breaths !== vitals.breaths || v.lungs !== vitals.lungs || v.supply !== vitals.supply || v.status !== vitals.status;
+    polls += 1;
+    if (changed || polls % 5 === 0) {
+      const [l, log] = await Promise.all([chain.view(coin, "lungs", {}), chain.view(coin, "log", { limit: 128 })]);
+      lungs = l;
+      lastLog = log;
+      renderLungs(l);
+      renderLog(log);
+      chain.view(coin, "speech", { limit: 1 }).then((speech) => {
+        if (speech.length) $("speech").textContent = speech[0].text;
+      }).catch(() => {});
+    }
     fetchedAt = Date.now();
     vitals = v;
-    lungs = l;
     $("notice").hidden = true;
     if (shownBreaths !== null && v.breaths !== shownBreaths) puff($("pet"));
     shownBreaths = v.breaths;
     renderVitals(v);
-    renderLungs(l);
-    renderLog(log);
-    if (speech.length) $("speech").textContent = speech[0].text;
-    const beats = log.filter((e) => e.kind === "Wage" || e.kind === "Bounty" || e.kind === "Ignite");
+    const beats = lastLog.filter((e) => e.kind === "Wage" || e.kind === "Bounty" || e.kind === "Ignite");
     drawEcg($("ecg"), { block: Number(v.block), beats, status: v.status });
-    renderUser().catch(() => {});
+    if (changed) renderUser().catch(() => {});
     tick();
   } catch (error) {
     const box = $("notice");
@@ -440,7 +447,7 @@ async function start() {
   await refresh();
   refreshSlow();
   setInterval(tick, 1000);
-  setInterval(refresh, 4000);
+  setInterval(refresh, 6000);
   setInterval(refreshSlow, 30000);
   if (chain.live) {
     // The wallet code is heavy, so it loads after the monitor is on screen.

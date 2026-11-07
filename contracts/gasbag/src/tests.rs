@@ -40,7 +40,7 @@ fn launch_rules() -> Rules {
         grace_blocks: 36_000,
         min_grace_blocks: 400,
         bounty_bps: 5_000,
-        breath_tgas: 3,
+        breath_tgas: 5,
         max_breath_tgas: 990,
         voice_account: None,
         voice_bps: 0,
@@ -115,10 +115,18 @@ fn rules_can_be_read_back_exactly() {
 }
 
 #[test]
-fn old_age_comes_at_about_day_58_with_launch_rules() {
+fn old_age_comes_at_about_day_53_with_launch_rules() {
     let c = launch();
     let days = (c.old_age_block - BIRTH) as f64 / 144_000.0;
-    assert!((57.9..58.1).contains(&days), "{days}");
+    assert!((52.7..53.0).contains(&days), "{days}");
+}
+
+#[test]
+#[should_panic(expected = "GASBAG[RULES] a real breath costs at least 5 TGas")]
+fn a_breath_cheaper_than_a_real_one_is_refused() {
+    let mut r = launch_rules();
+    r.breath_tgas = 4;
+    coin(r);
 }
 
 #[test]
@@ -142,6 +150,15 @@ fn an_excessive_wage_is_refused() {
 fn a_breath_limit_above_the_protocol_limit_is_refused() {
     let mut r = launch_rules();
     r.max_breath_tgas = 999;
+    coin(r);
+}
+
+#[test]
+#[should_panic(expected = "GASBAG[RULES] no schedule can be longer than a year")]
+fn a_coin_that_could_never_die_is_refused() {
+    let mut r = launch_rules();
+    r.grace_blocks = 10_000_000_000_000;
+    r.doubling_blocks = 10_000_000_000_000;
     coin(r);
 }
 
@@ -243,9 +260,9 @@ fn a_lung_without_enough_gas_is_refused() {
 #[test]
 fn the_fuel_needed_rises_with_age() {
     let c = launch();
-    assert_eq!(c.breath_gas(BIRTH), Gas::from_tgas(3).as_gas());
-    assert_eq!(c.breath_gas(BIRTH + 1_008_000), Gas::from_tgas(6).as_gas());
-    assert_eq!(c.breath_gas(BIRTH + 1_512_000), Gas::from_tgas(9).as_gas());
+    assert_eq!(c.breath_gas(BIRTH), Gas::from_tgas(5).as_gas());
+    assert_eq!(c.breath_gas(BIRTH + 1_008_000), Gas::from_tgas(10).as_gas());
+    assert_eq!(c.breath_gas(BIRTH + 1_512_000), Gas::from_tgas(15).as_gas());
 }
 
 #[test]
@@ -347,7 +364,7 @@ fn a_lung_out_of_fuel_takes_its_last_gasp() {
     let mut c = launch();
     buy(&mut c, BIRTH + 1, "alice.testnet", 100);
     ignite(&mut c, BIRTH + 10, "alice.testnet");
-    breathe(&mut c, BIRTH + 210, "alice.testnet", 4);
+    breathe(&mut c, BIRTH + 210, "alice.testnet", 7);
     assert!(c.lung_of(acct("alice.testnet")).is_none());
     assert!(get_logs().iter().any(|l| l.contains("last_gasp")));
     assert_eq!(c.vitals_status(), "apnea");
@@ -443,7 +460,7 @@ fn the_best_streak_survives_apnea() {
     buy(&mut c, BIRTH + 1, "alice.testnet", 100);
     ignite(&mut c, BIRTH + 10, "alice.testnet");
     breathe(&mut c, BIRTH + 210, "alice.testnet", 900);
-    breathe(&mut c, BIRTH + 410, "alice.testnet", 4);
+    breathe(&mut c, BIRTH + 410, "alice.testnet", 7);
     assert_eq!(c.best_streak_blocks, 400);
     ignite(&mut c, BIRTH + 1_000, "alice.testnet");
     assert_eq!(c.best_streak_blocks, 400);
@@ -586,6 +603,31 @@ fn claim_order_does_not_change_anyones_share() {
 }
 
 #[test]
+fn claims_long_after_death_add_no_rows_to_the_daily_table() {
+    let mut c = launch();
+    buy(&mut c, BIRTH + 1, "alice.testnet", 100);
+    buy(&mut c, BIRTH + 2, "bob.testnet", 100);
+    at(BIRTH + 36_001, "alice.testnet", 0, 30);
+    c.claim();
+    let death_day = c.day_index(c.death.as_ref().unwrap().block);
+    at(BIRTH + 36_001 + 500 * 144_000, "bob.testnet", 0, 30);
+    c.claim();
+    assert!(c.days.get(&(death_day + 500)).is_none());
+    assert!(c.days.get(&death_day).is_some());
+}
+
+#[test]
+fn a_lung_reaped_after_death_does_not_stretch_the_streak() {
+    let mut c = launch();
+    buy(&mut c, BIRTH + 1, "alice.testnet", 100);
+    ignite(&mut c, BIRTH + 2, "alice.testnet");
+    let dead_at = c.deadline_block + 1;
+    at(dead_at + 900_000, "anyone.testnet", 0, 30);
+    c.reap(acct("alice.testnet"));
+    assert!(c.best_streak_blocks <= dead_at - BIRTH, "{}", c.best_streak_blocks);
+}
+
+#[test]
 #[should_panic(expected = "GASBAG[NOTHING]")]
 fn nobody_can_claim_twice() {
     let mut c = launch();
@@ -615,7 +657,7 @@ fn death_is_recorded_once_with_the_final_numbers() {
     let mut c = launch();
     let got = buy(&mut c, BIRTH + 1, "alice.testnet", 100);
     ignite(&mut c, BIRTH + 2, "alice.testnet");
-    breathe(&mut c, BIRTH + 202, "alice.testnet", 4);
+    breathe(&mut c, BIRTH + 202, "alice.testnet", 7);
     let wages = c.wages;
     at(c.deadline_block + 1, "anyone.testnet", 0, 30);
     c.pronounce();

@@ -45,11 +45,13 @@ impl Contract {
 
 ## Or use the Pacemaker, with no code changes
 
-The [`pacemaker`](../contracts/pacemaker/src/lib.rs) contract does this for any existing contract. Register a target, a method and an interval, attach gas, and it calls that method on schedule. Your contract can allow-list the pacemaker's account instead of a keeper's key. When the gas runs out, anyone can refuel the job.
+The [`pacemaker`](../contracts/pacemaker/src/lib.rs) contract does this for any existing contract. Register a target, a method and an interval, attach gas, and it calls that method on schedule. Your contract can allow-list the pacemaker's account instead of a keeper's key.
+
+Only the target itself or its parent account can register a job, so nobody can use the pacemaker to call a contract that trusts it. Sign `schedule` from the contract's own account or from its parent. When a job stops, anyone can restart it with `fuel`. While it is running, only its owner can replace the chain.
 
 ```bash
 near contract call-function as-transaction <pacemaker> schedule json-args '{
-  "target": "your-contract.testnet",
+  "target": "your-contract.you.testnet",
   "method": "tick",
   "args": "e30=",
   "every_beats": 5,
@@ -59,14 +61,16 @@ near contract call-function as-transaction <pacemaker> schedule json-args '{
 
 ## How long a chain lasts
 
-At protocol 88 a transaction can carry 1,000 TGas. Gas costs 0.0001 NEAR per TGas, so a full transaction pays at most 0.1 NEAR, and unused gas is refunded.
+At protocol 88 a transaction can carry 1,000 TGas. Gas burns at 0.0001 NEAR per TGas, so a full chain burns at most 0.1 NEAR. It does need about 1 NEAR available when it starts, because prepaid gas is bought at the protocol's `min_gas_purchase_price` of 0.001 NEAR per TGas. Each beat refunds the difference on what it burned, and the unused gas comes back when the chain ends.
 
 | Gas per beat | Beats per transaction | Runs for |
 |---|---|---|
-| 2 TGas | 500 | about 16 hours |
 | 3 TGas | 333 | about 11 hours |
+| 5 TGas | 200 | about 6.5 hours |
 | 10 TGas | 100 | about 3.3 hours |
 | 30 TGas | 33 | about 1 hour |
+
+A real beat costs more than its own logic: a GASBAG breath measured on testnet costs 5.0 to 5.3 TGas, of which about 2.2 TGas is base fees, state writes and arming the next beat.
 
 A keeper-free chain still needs someone to send a transaction every so often. The difference is that this is one transaction every few hours from anyone, instead of an always-on server with a privileged key. If nobody sends it, the schedule stops. It doesn't fail silently into a wrong state.
 

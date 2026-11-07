@@ -9,7 +9,7 @@ Built at NEAR HACKATHON (November 2026) for the track **Memecoins With Mechanics
 | **What it is** | A NEP-141 token whose heartbeat is a chain of NEAR receipts. One transaction keeps the contract waking itself every 200 blocks, about 2 minutes, with no keeper, until the gas runs out. Then it really stops. |
 | **The problem** | Most memecoins die quietly, and the last buyers lose everything. Contracts can't act by themselves either, so scheduled mechanics usually lean on a bot or a server someone can switch off. |
 | **What is new** | The coin wakes itself using NEP-519 yield timeouts, so nothing off chain keeps it alive. When it dies, a will pays out: holders burn tokens for a pro-rata share of an estate that nobody could touch while it lived. |
-| **Status** | **PENDING DEPLOYMENT.** Contracts, tests, simulation and page are built. Live addresses and transaction links will appear here after the testnet run. |
+| **Status** | Working on NEAR testnet. The heartbeat, a full life and a payout have all run on the real network ([evidence below](#proven-on-testnet)). The main coin launches shortly before judging, because keeping it alive costs more as it ages. |
 
 ## The six rules
 
@@ -18,15 +18,13 @@ All of them live in the contract. Every parameter is fixed in `new`, readable th
 1. **Breathe.** Anyone sends one transaction with up to 1,000 TGas. That starts a *lung*, which wakes the contract every 200 blocks until its gas runs out. One lung per account.
 2. **Get paid.** While any lung is alive, 0.5% of supply per day is minted to the lungs, split equally. Holders who never help get diluted.
 3. **Buy in.** Anyone can mint on a linear bonding curve. All the NEAR goes to the estate, less a 1% share for its AI voice. There is no sell-back and no withdraw method.
-4. **Grow old.** Gas per breath doubles every 7 days and the grace period halves. Around day 58 a single breath no longer fits in a transaction, and it dies of old age.
+4. **Grow old.** Gas per breath doubles every 7 days and the grace period halves. Around day 53 a single breath no longer fits in a transaction, and it dies of old age.
 5. **Stop breathing.** If every lung runs out, wages stop. Half the missed wages build a rescue bounty for whoever restarts it, and the other half is never minted.
 6. **Die.** With no breath for the whole grace period it is dead for good. Anyone can burn GASBAG for a pro-rata share of the estate.
 
 The game inside it: while it isn't breathing, the bounty keeps growing, so waiting pays until someone else moves or the coin dies. Who blinks first?
 
 ## Try it: do X, see Y
-
-**PENDING DEPLOYMENT.** Coin addresses go in these steps after the testnet run.
 
 ### With no wallet and no account
 
@@ -66,7 +64,25 @@ Needs Rust and [cargo-near](https://github.com/near/cargo-near).
 cd contracts && cargo test --workspace
 ```
 
-You should see 100 tests pass: 79 for the coin, 9 for the pacemaker, and 6 each for the hatchery and the heartbeat module. Then run the simulation with `python sim/gasbag_sim.py baseline 40`, which uses only the standard library and prints the outcome table.
+You should see 110 tests pass: 84 for the coin, 14 for the pacemaker, and 6 each for the hatchery and the heartbeat module. Then run the simulation with `python sim/gasbag_sim.py baseline 40`, which uses only the standard library and prints the outcome table.
+
+## Proven on testnet
+
+These are real transactions on NEAR testnet, from coins deliberately run to the end of their lives.
+
+| What was shown | Result | Transaction |
+|---|---|---|
+| One transaction keeps a contract waking itself | 3 breaths exactly 201 blocks apart, with nothing else sent to the contract, then a last gasp | [`GGrNGrAm…`](https://testnet.nearblocks.io/txns/GGrNGrAmvxpmjZb4D73rKrZBXTSD2uBEjsfHgNWgqscs) |
+| A full 1,000 TGas lung | Accepted, and ran until it was retired | [`9wCc8zKi…`](https://testnet.nearblocks.io/txns/9wCc8zKih1EEFFkbK4wv1AfkrBGNwdDw9orpEkQBybvv) |
+| Ageing and last gasp on a 15-minute coin | Breath cost rose as designed, and the lung ended after 5 breaths | [`6xCVCo9f…`](https://testnet.nearblocks.io/txns/6xCVCo9f6cWn4tgUzPXo45GrMbTENQyQhMSnzuWZRSt7) |
+| A rescue from apnea | The next breath paid a 3,068-token bounty on top of wages | [`5Afdj91c…`](https://testnet.nearblocks.io/txns/5Afdj91ckHvFEw1aGyc4VejA5g4BzV71vYVwTm9mY1ub) |
+| Death by old age | Dead at age 1,512 blocks against a limit of 1,510, and a later `buy` failed with `GASBAG[DEAD]` | Same coin, `death()` before it was retired |
+| The will | All 328,602 tokens burned and the whole 0.295 NEAR estate paid out. A second claim failed with `GASBAG[NOTHING]` | [`H5vojYBv…`](https://testnet.nearblocks.io/txns/H5vojYBv4jeTE79wYLiAHFPwhm1NqVu2zSduN9CYGRN) |
+| The pacemaker refuses a stranger | `PACEMAKER[TARGET] only a contract or its parent account can schedule calls to it` | [`9Bt4scQC…`](https://testnet.nearblocks.io/txns/9Bt4scQCag3UcYjEyJrWyEgNJSndyoLvEsU647L4RLbw) |
+
+Live contract: [`pacemaker.gasbag-hq.testnet`](https://testnet.nearblocks.io/address/pacemaker.gasbag-hq.testnet), with no access keys.
+
+Measured on testnet: a breath costs 5.0 to 5.3 TGas in total at birth, and beats landed exactly 201 blocks apart. Prepaid gas is bought at 0.001 NEAR per TGas and burned at 0.0001, and each breath refunds the difference, so a full lung needs about 1 NEAR held up front but burns about 0.1.
 
 ## Against the track's requirements
 
@@ -85,14 +101,14 @@ This couldn't be built the same way on Ethereum or Solana, where a contract can'
 - **Yield timeouts ([NEP-519](https://github.com/near/NEPs/blob/master/neps/nep-0519.md)).** A yielded promise nobody resumes fires by itself after 200 blocks. The callback yields again and forwards its gas, so one transaction becomes a timed chain.
 - **1,000 TGas transactions.** At protocol 88 one transaction can carry 1 PGas, which is what lets a lung last hours.
 - **Keyless accounts.** The coin's account has no access keys, so "nobody can change this" is something you can check.
-- **Function-call keys.** The page uses a small key that can only call `ignite`, so a lung doesn't leave a wallet waiting on a transaction that stays open for hours.
+- **Function-call keys.** A lung's transaction stays open for hours, and a client that waits for it gets a 408 timeout after 30 seconds, even though the lung is fine. So the page uses a small key that can only call `ignite`, and submits without waiting. On testnet that key was refused for `claim` and for a transfer.
 - **Live state in metadata.** `ft_metadata` returns an icon that follows the coin's state, so a wallet that reads it live sees it die.
 
 ## What it gives NEAR
 
 - **A keeper-free scheduler for every NEAR contract.** The [`pacemaker`](contracts/pacemaker/src/lib.rs) contract calls any method on any contract on a schedule, with nothing running off chain. The [`near-heartbeat`](contracts/heartbeat/src/lib.rs) crate does the same inside a contract. [The guide](docs/HEARTBEAT.md) explains the pattern and its limits.
-- **A launchpad for mortal coins.** The [`hatchery`](contracts/hatchery/src/lib.rs) launches a keyless coin in one transaction.
-- **Real NEAR burned.** Every breath burns gas. Contract gas rewards are zero at protocol 88, so none of it comes back. The simulation burned about 6 NEAR in a small community and 1,413 in the longest life.
+- **A launchpad for mortal coins.** The [`hatchery`](contracts/hatchery/src/lib.rs) launches a keyless coin in one transaction, always on the same published rules.
+- **Real NEAR burned.** Every breath burns gas. Contract gas rewards are zero at protocol 88, so none of it comes back. The simulation burned about 2.5 NEAR in a small community and 1,338 in the longest life.
 - **An answer to a request.** NEAR's co-founder [described an AI pet](https://crypto.news/near-co-founder-pitches-ai-pets-private-trading/) with its own NEAR balance paying for inference and its prompt on chain. Gasbag is a community-owned take on that, through a coin instead of an NFT.
 
 ## The simulation
@@ -101,32 +117,32 @@ This couldn't be built the same way on Ethereum or Solana, where a contract can'
 
 | Scenario | Days lived | Supply | Estate, NEAR | Nurses' share | First 10% of buyers | Last 10% of buyers |
 |---|---|---|---|---|---|---|
-| Steady community | 32.2 | 312.0M | 1,056 | 10.7% | ×2.08 | ×0.53 |
-| Hype then fade | 36.6 | 676.4M | 3,864 | 15.1% | ×2.29 | ×0.47 |
-| Whale never helps | 35.0 | 422.7M | 1,665 | 14.3% | ×3.79 | ×0.49 |
-| Sybil swarm | 29.6 | 351.4M | 1,312 | 10.0% | ×2.17 | ×0.52 |
-| Pure chicken | 25.7 | 96.6M | 175 | 5.3% | ×1.61 | ×0.65 |
-| Bots to the end | 58.0 | 952.7M | 6,440 | 21.1% | ×2.21 | ×0.43 |
-| Hackathon-sized | 17.3 | 43.0M | 58 | 4.4% | ×1.25 | ×0.75 |
-| Ghost town | 1.6 | 15.4M | 18 | 0.5% | n/a | ×0.89 |
+| Steady community | 27.8 | 268.6M | 845 | 9.2% | ×2.04 | ×0.54 |
+| Hype then fade | 34.9 | 674.4M | 3,908 | 14.3% | ×2.30 | ×0.48 |
+| Whale never helps | 30.7 | 403.6M | 1,594 | 12.7% | ×3.79 | ×0.50 |
+| Sybil swarm | 28.1 | 341.0M | 1,261 | 9.3% | ×2.16 | ×0.53 |
+| Pure chicken | 22.6 | 91.4M | 163 | 4.5% | ×1.60 | ×0.66 |
+| Bots to the end | 52.8 | 883.7M | 5,773 | 19.5% | ×2.27 | ×0.44 |
+| Hackathon-sized | 13.4 | 26.3M | 32 | 3.1% | ×1.23 | ×0.81 |
+| Ghost town | 1.3 | 15.4M | 18 | 0.4% | n/a | ×0.89 |
 
 Buyer columns show NEAR received at death per NEAR paid, holding to the end.
 
 ## Sybil resistance and its limits
 
-- **Wages follow gas actually burned.** Each lung gets an equal share and each lung burns a full lung of gas, so splitting into more accounts earns nothing extra. In the simulation, 50 accounts earned 1.35 NEAR per NEAR of gas against 1.53 for one honest bot.
+- **Wages follow gas actually burned.** Each lung gets an equal share and each lung burns a full lung of gas, so splitting into more accounts earns nothing extra. In the simulation, 50 accounts earned 1.46 NEAR per NEAR of gas against 1.60 for one honest bot.
 - **Buying is unaffected by splitting.** The curve charges the same however a purchase is divided.
 - **Limit: bots can outspend people.** Someone who burns more gas gets a bigger share of wages. It's proportional, not free, but it does favour automation.
 - **Limit: there is no proof of personhood.** One person can run many lungs. Nothing in the contract tries to stop that, because the cost already scales.
 
 ## Honest limits
 
-- **It is a game of who pays whom.** Early buyers are paid by later ones. In the simulation the first 10% of buyers got ×1.25 to ×3.79 and the last 10% got ×0.43 to ×0.89. The last buyer can get back as little as about 37% after a full life of wages. It runs on testnet, and a mainnet launch could count as gambling or a security in some places.
-- **Someone has to fuel it.** At birth one transaction lasts about 11 hours. The chain needs a person or a script to send that, though anyone can and nobody needs permission. If nobody does, it dies, which is the point.
+- **It is a game of who pays whom.** Early buyers are paid by later ones. In the simulation the first 10% of buyers got ×1.23 to ×3.79 and the last 10% got ×0.44 to ×0.89. The last buyer can get back as little as about 37% after a full life of wages. It runs on testnet, and a mainnet launch could count as gambling or a security in some places.
+- **Someone has to fuel it.** At birth one transaction lasts about 6.5 hours, and it needs about 1 NEAR held up front, most of it refunded as the lung burns. The chain needs a person or a script to send that, though anyone can and nobody needs permission. If nobody does, it dies, which is the point.
 - **Nothing can upgrade it.** A bug can't be patched on a keyless coin. A new coin would have to be launched instead.
 - **The voice account is a real role.** If a voice is set at launch, that one account can post lines and draw its 1% budget. It can't touch the estate or the rules.
 - **On-chain randomness isn't used**, so there is nothing for a validator to bias.
-- **Not audited.**
+- **Reviewed, not audited.** An independent review of the code found a critical impersonation flaw and a griefing path in the pacemaker, and smaller issues elsewhere. All are fixed, with a test for each. It wasn't a professional audit.
 
 ## Repository
 
@@ -136,7 +152,7 @@ contracts/heartbeat   near-heartbeat, the reusable timer module
 contracts/pacemaker   a public keeper-free scheduler for any contract
 contracts/hatchery    launches keyless coins, including 15-minute speedruns
 web                   the live page: static, reads the chain directly, no backend
-scripts               verify, status, ignite, launch, caretaker, speak
+scripts               verify, status, ignite, buy, claim, schedule, launch, caretaker, speak
 sim                   the 60-day simulator and its results
 docs/HEARTBEAT.md     the keeper-free timer guide
 ```

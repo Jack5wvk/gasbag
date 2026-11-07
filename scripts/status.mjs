@@ -21,12 +21,11 @@ console.log(`  flatline in    ${left > 0 ? minutes(left) : "passed"}`);
 console.log(`  breath costs   ${v.breath_tgas} TGas, grace ${minutes(v.grace_blocks)}`);
 console.log(`  streak         ${minutes(v.streak_blocks)}, best ${minutes(v.best_streak_blocks)}`);
 console.log(`  supply         ${whole(v.supply)} GASBAG (${whole(v.bought)} bought, ${whole(v.wages)} wages, ${whole(v.burned)} burned)`);
-console.log(`  estate         ${near(v.estate_left)} NEAR, floor ${near(v.floor)} NEAR per token`);
-console.log(`  price          ${near(v.price)} NEAR per token`);
+console.log(`  estate         ${near(v.estate_left)} NEAR, floor ${near(BigInt(v.floor) * 1_000_000n)} NEAR per 1M tokens`);
+console.log(`  price          ${near(BigInt(v.price) * 1_000_000n)} NEAR per 1M tokens`);
 console.log(`  rescue bounty  ${whole(v.rescue_bounty)} GASBAG`);
 console.log(`  gas burned     ${near(BigInt(v.gas_burned) * 100_000_000n)} NEAR by breaths`);
 console.log(`  lungs          ${v.lungs}`);
 for (const [owner, lung] of lungs) {
-  const breathsLeft = Math.floor(lung.fuel_tgas / Number(v.breath_tgas));
-  console.log(`    ${owner}: ${lung.breaths} breaths, ${lung.fuel_tgas} TGas left, about ${breathsLeft} more`);
+  console.log(`    ${owner}: ${lung.breaths} breaths, ${lung.fuel_tgas} TGas left`);
 }

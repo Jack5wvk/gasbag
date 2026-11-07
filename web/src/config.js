@@ -1,6 +1,6 @@
 // Addresses of the live deployment. Change them here after a new launch.
 export const NETWORK = "testnet";
-export const RPC_URLS = ["https://rpc.testnet.fastnear.com", "https://test.rpc.fastnear.com"];
+export const RPC_URLS = ["https://test.rpc.fastnear.com", "https://rpc.testnet.fastnear.com", "https://near-testnet.drpc.org"];
 export const EXPLORER = "https://testnet.nearblocks.io";
 export const MAIN_COIN = "coin.gasbag-hq.testnet";
 export const HATCHERY = "hatchery.gasbag-hq.testnet";

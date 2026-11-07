@@ -7,6 +7,9 @@
 //!
 //! The contract code is built into this one, so the hatchery itself has nothing to configure and
 //! no owner. Every hatch pays for its own copy of the code, which is why it costs about 3 NEAR.
+//!
+//! Every coin hatched here uses the same fixed speedrun rules, so a listing can't hide a coin with
+//! rigged parameters.
 
 use near_sdk::json_types::U64;
 use near_sdk::store::Vector;
@@ -22,6 +25,8 @@ const CALLBACK_GAS: Gas = Gas::from_tgas(8);
 const NEAR: u128 = 1_000_000_000_000_000_000_000_000;
 /// Pays for the code and the coin's starting state. Stays in the coin's account for good.
 const HATCH_PRICE: u128 = 3 * NEAR + NEAR / 10;
+/// Kept from each hatch to pay for its row in the list, so the list never runs out of storage.
+const LISTING_FEE: u128 = NEAR / 100;
 const MAX_LABEL_BYTES: usize = 24;
 
 /// A life of about 15 minutes. Gas per breath doubles every 3 minutes from 30 TGas.
@@ -71,17 +76,10 @@ impl Hatchery {
         Self { coins: Vector::new(Key::Coins) }
     }
 
-    /// Creates `<label>.<this account>` with no keys and starts a coin there. Without `rules`, it
-    /// uses the speedrun rules. If anything fails, the deposit goes back to the caller.
+    /// Creates `<label>.<this account>` with no keys and starts a coin there on the speedrun rules.
+    /// If anything fails, the deposit goes back to the caller.
     #[payable]
-    pub fn hatch(
-        &mut self,
-        label: String,
-        name: String,
-        symbol: String,
-        rules: Option<serde_json::Value>,
-        soul: Option<String>,
-    ) -> Promise {
+    pub fn hatch(&mut self, label: String, name: String, symbol: String) -> Promise {
         let hatcher = env::predecessor_account_id();
         let deposit = env::attached_deposit();
         require!(
@@ -97,11 +95,11 @@ impl Hatchery {
         let coin: AccountId = format!("{label}.{}", env::current_account_id())
             .parse()
             .unwrap_or_else(|_| env::panic_str("HATCHERY[LABEL] that is not a valid account name"));
-        let rules = rules.unwrap_or_else(|| serde_json::from_str(SPEEDRUN_RULES).expect("built-in rules"));
+        let rules: serde_json::Value = serde_json::from_str(SPEEDRUN_RULES).expect("built-in rules");
         let args = serde_json::json!({
             "name": name,
             "symbol": symbol,
-            "soul": soul.unwrap_or_else(|| SPEEDRUN_SOUL.to_string()),
+            "soul": SPEEDRUN_SOUL,
             "rules": rules,
         })
         .to_string()
@@ -110,7 +108,7 @@ impl Hatchery {
         // No AddKey anywhere in this batch: the coin is keyless from its first block.
         Promise::new(coin.clone())
             .create_account()
-            .transfer(deposit)
+            .transfer(deposit.saturating_sub(NearToken::from_yoctonear(LISTING_FEE)))
             .deploy_contract(GASBAG_WASM.to_vec())
             .function_call("new", args, NearToken::from_yoctonear(0), INIT_GAS)
             .then(
@@ -180,7 +178,7 @@ mod tests {
     }
 
     fn hatch(h: &mut Hatchery, label: &str) -> Promise {
-        h.hatch(label.into(), "Tiny".into(), "TINY".into(), None, None)
+        h.hatch(label.into(), "Tiny".into(), "TINY".into())
     }
 
     #[test]

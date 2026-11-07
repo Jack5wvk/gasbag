@@ -39,6 +39,9 @@ use near_sdk::{
 const LAST_GASP_RESERVE: Gas = Gas::from_tgas(3);
 /// Gas `ignite` needs for itself, on top of one breath.
 const IGNITE_OVERHEAD: Gas = Gas::from_tgas(5);
+/// What a breath still spends after its metabolism burn: base fees, writing state and arming the
+/// next beat. Measured on testnet, so `breath_tgas` means what a breath really costs.
+const BREATH_TAIL: Gas = Gas::from_gas(2_200_000_000_000);
 /// A lung this many beats overdue has failed and can be removed by anyone.
 const STALE_AFTER_BEATS: u64 = 3;
 /// Entries kept in the on-chain log. Older mints and burns remain in the NEP-297 events.
@@ -50,6 +53,8 @@ const MAX_SOUL_BYTES: usize = 2_000;
 /// Covers one balance row and one lung row for the longest possible account id.
 const STORAGE_BYTES_PER_ACCOUNT: u64 = 500;
 const BPS: u128 = 10_000;
+/// About a year of blocks. No schedule may be longer, so a coin can't be set up to never die.
+const MAX_SCHEDULE_BLOCKS: u64 = 52_560_000;
 const MIN_BUY: u128 = 1_000_000_000_000_000_000_000; // 0.001 NEAR
 
 /// The laws of this coin. Set once at launch. Nothing can change them.
@@ -201,7 +206,7 @@ pub struct Vitals {
     /// Estate per whole token.
     pub floor: U128,
     pub voice_budget: U128,
-    /// Gas burned by breaths. A lower bound, as protocol base fees are not counted.
+    /// Gas burned by breaths, including an estimate of each breath's overhead.
     pub gas_burned: U128,
     pub holders: U64,
 }
@@ -279,6 +284,12 @@ impl Gasbag {
         require!(rules.curve_step.0 > 0, "GASBAG[RULES] curve_step must be positive");
         require!(rules.wage_bps_per_day <= 1_000, "GASBAG[RULES] wage is capped at 10% a day");
         require!(rules.blocks_per_day >= heartbeat::BEAT_BLOCKS, "GASBAG[RULES] a day must be at least one beat");
+        require!(
+            rules.blocks_per_day <= MAX_SCHEDULE_BLOCKS
+                && rules.doubling_blocks <= MAX_SCHEDULE_BLOCKS
+                && rules.grace_blocks <= MAX_SCHEDULE_BLOCKS,
+            "GASBAG[RULES] no schedule can be longer than a year"
+        );
         require!(rules.doubling_blocks >= heartbeat::BEAT_BLOCKS, "GASBAG[RULES] doubling must be at least one beat");
         require!(
             rules.min_grace_blocks >= 2 * heartbeat::BEAT_BLOCKS,
@@ -286,7 +297,7 @@ impl Gasbag {
         );
         require!(rules.grace_blocks >= rules.min_grace_blocks, "GASBAG[RULES] grace is below its minimum");
         require!(rules.bounty_bps as u128 <= BPS, "GASBAG[RULES] bounty is above 100%");
-        require!(rules.breath_tgas >= 2, "GASBAG[RULES] a breath costs at least 2 TGas");
+        require!(rules.breath_tgas >= 5, "GASBAG[RULES] a real breath costs at least 5 TGas");
         require!(
             rules.max_breath_tgas > rules.breath_tgas
                 && Gas::from_tgas(rules.max_breath_tgas).saturating_add(IGNITE_OVERHEAD) <= heartbeat::MAX_TX_GAS,
@@ -464,9 +475,10 @@ impl Gasbag {
         // Metabolism: this breath burns its age-appropriate gas, then decides whether the fuel
         // left pays for another one.
         let cost = Gas::from_gas(self.breath_gas(now));
+        let target = cost.saturating_sub(BREATH_TAIL);
         let stop_at = env::prepaid_gas().saturating_sub(LAST_GASP_RESERVE);
-        heartbeat::burn_to(if cost < stop_at { cost } else { stop_at });
-        let used = env::used_gas().as_gas() as u128;
+        heartbeat::burn_to(if target < stop_at { target } else { stop_at });
+        let used = env::used_gas().saturating_add(BREATH_TAIL).as_gas() as u128;
         self.gas_burned += used;
         let day = self.day_index(now);
         self.update_day(day, |d, supply| {
@@ -501,7 +513,11 @@ impl Gasbag {
             now > lung.last_breath_block + STALE_AFTER_BEATS * heartbeat::BEAT_BLOCKS,
             "GASBAG[REAP] that lung is healthy"
         );
-        self.accrue(now);
+        // A lung reaped after death must not stretch the streak past the moment of death.
+        self.pronounce_at(now);
+        if self.death.is_none() {
+            self.accrue(now);
+        }
         self.remove_lung(&owner, now);
     }
 
@@ -527,7 +543,9 @@ impl Gasbag {
         self.burned += balance;
         FtBurn { owner_id: &who, amount: U128(balance), memo: Some("claim") }.emit();
         self.note(Kind::Claim, Some(who.clone()), balance);
-        let day = self.day_index(now);
+        // Every claim lands on the day of death, so claims can't add rows to the table forever.
+        let died = self.death.as_ref().map_or(now, |d| d.block);
+        let day = self.day_index(died);
         self.update_day(day, |d, supply| {
             d.burned = U128(d.burned.0 + balance);
             d.supply_end = U128(supply);
@@ -702,7 +720,8 @@ impl Gasbag {
             Gas::from_tgas(self.rules.breath_tgas).as_gas() as u128,
             self.age(now),
             self.rules.doubling_blocks,
-        ) as u64
+        )
+        .min(u64::MAX as u128) as u64
     }
 
     fn grace_at(&self, now: u64) -> u64 {

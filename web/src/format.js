@@ -1,4 +1,4 @@
-import { NEAR, ONE_TOKEN, SECONDS_PER_BLOCK } from "./config.js";
+import { BEAT_BLOCKS, NEAR, ONE_TOKEN, SECONDS_PER_BLOCK } from "./config.js";
 
 /** yoctoNEAR to a readable NEAR figure. */
 export function nearText(yocto, digits = 4) {
@@ -67,6 +67,28 @@ function isqrt(value) {
   while (x * x > value) x -= 1n;
   while ((x + 1n) * (x + 1n) <= value) x += 1n;
   return x;
+}
+
+/** Gas per breath at an age. Mirrors `doubled` in contracts/gasbag/src/math.rs, in TGas. */
+export function breathAt(ageBlocks, rules) {
+  const period = Number(rules.doubling_blocks);
+  const whole = Math.floor(ageBlocks / period);
+  return Number(rules.breath_tgas) * 2 ** whole * (1 + (ageBlocks % period) / period);
+}
+
+/** How many more breaths a lung's fuel pays for. Each one costs more than the last as the coin ages. */
+export function breathsLeft(fuelTgas, ageBlocks, rules) {
+  let fuel = fuelTgas;
+  let age = ageBlocks;
+  let breaths = 0;
+  while (breaths < 2000) {
+    age += BEAT_BLOCKS;
+    const cost = breathAt(age, rules);
+    if (fuel < cost) break;
+    fuel -= cost;
+    breaths += 1;
+  }
+  return breaths;
 }
 
 export const parseNear = (text) => {

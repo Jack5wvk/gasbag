@@ -8,9 +8,11 @@
 //   node scripts/launch.mjs hatchery  --parent gasbag-hq.testnet --name hatchery
 //
 // Add --keep-key to skip locking, for a throwaway test only.
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { Account, JsonRpcProvider, KeyPair, actions } from "near-api-js";
-import { EXPLORER, NEAR, RPC, TGAS, accessKeys, argv, secretKeyFor } from "./lib.mjs";
+import { EXPLORER, NEAR, NETWORK, RPC, TGAS, accessKeys, argv, secretKeyFor } from "./lib.mjs";
 
 const SOUL =
   "You are Gasbag, a talkative balloon on life support. You run on NEAR gas and you are always nearly dead. " +
@@ -26,7 +28,7 @@ const PRESETS = {
       base_price: NEAR_PER_TOKEN_START, curve_step: "50000000",
       wage_bps_per_day: 50, blocks_per_day: 144_000,
       doubling_blocks: 1_008_000, grace_blocks: 36_000, min_grace_blocks: 400,
-      bounty_bps: 5_000, breath_tgas: 3, max_breath_tgas: 990,
+      bounty_bps: 5_000, breath_tgas: 5, max_breath_tgas: 990,
       voice_account: null, voice_bps: 0,
     },
   },
@@ -67,7 +69,7 @@ const init = kind === "coin" ? { method: "new", args: preset } : { method: "new"
 
 const provider = new JsonRpcProvider({ url: RPC });
 const parent = new Account(parentId, provider, secretKeyFor(parentId));
-const keyPair = KeyPair.fromRandom();
+const keyPair = KeyPair.fromRandom("ed25519");
 const publicKey = keyPair.getPublicKey();
 
 console.log(`Creating ${id} with ${wasm.length} bytes of code...`);
@@ -84,13 +86,21 @@ const result = await parent.signAndSendTransaction({
 console.log(`Launched: ${EXPLORER}/address/${id} in ${result.transaction.hash}`);
 
 if (flags["keep-key"]) {
+  // A throwaway test. The key goes in the keychain so the account can be deleted and refunded.
+  const file = join(homedir(), ".near-credentials", NETWORK, `${id}.json`);
+  writeFileSync(file, JSON.stringify({ account_id: id, public_key: publicKey.toString(), private_key: keyPair.toString() }), { mode: 0o600 });
   console.log("Key kept. This account is NOT locked.");
   process.exit(0);
 }
 
 const self = new Account(id, provider, keyPair.toString());
 await self.signAndSendTransaction({ receiverId: id, actions: [actions.deleteKey(publicKey)] });
-const left = await accessKeys(id);
+// The key list is read at final, which trails the latest block by a few seconds.
+let left = await accessKeys(id);
+for (let i = 0; i < 10 && left.length !== 0; i++) {
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  left = await accessKeys(id);
+}
 if (left.length !== 0) {
   console.error(`Lock failed: ${left.length} key(s) remain on ${id}.`);
   process.exit(1);

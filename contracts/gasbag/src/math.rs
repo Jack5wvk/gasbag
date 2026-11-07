@@ -29,8 +29,8 @@ pub fn doubled(base: u128, age: u64, period: u64) -> u128 {
 /// Value of `base` halved every `period`, falling in a straight line between halvings.
 pub fn halved(base: u64, age: u64, period: u64) -> u64 {
     let halvings = (age / period).min(63) as u32;
-    let at_start = base >> halvings;
-    at_start - at_start * (age % period) / (2 * period)
+    let at_start = (base >> halvings) as u128;
+    (at_start - at_start * (age % period) as u128 / (2 * period as u128)) as u64
 }
 
 /// The first age at which [`doubled`] reaches `limit`.
@@ -129,6 +129,12 @@ mod tests {
     }
 
     #[test]
+    fn halved_cant_overflow_with_the_longest_allowed_schedules() {
+        let year = 52_560_000;
+        assert_eq!(halved(year, year / 2, year), year - year / 4);
+    }
+
+    #[test]
     fn halved_never_rises_with_age() {
         let mut last = u64::MAX;
         for age in (0..1000).step_by(7) {
@@ -148,10 +154,10 @@ mod tests {
     }
 
     #[test]
-    fn launch_limit_lands_around_day_58() {
-        let age = age_when_doubled_reaches(3_000_000_000_000, 990_000_000_000_000, 1_008_000);
+    fn launch_limit_lands_around_day_53() {
+        let age = age_when_doubled_reaches(5_000_000_000_000, 990_000_000_000_000, 1_008_000);
         let days = age as f64 / 144_000.0;
-        assert!((57.9..58.1).contains(&days), "{days}");
+        assert!((52.7..53.0).contains(&days), "{days}");
     }
 
     #[test]

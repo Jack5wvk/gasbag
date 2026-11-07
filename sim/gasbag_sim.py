@@ -57,7 +57,7 @@ class Params:
     grace_hours: float = 6.0      # grace at birth
     min_grace_minutes: float = 4.0
     bounty_share: float = 0.5     # share of missed wages that becomes the bounty
-    breath0_tgas: float = 3.0     # gas per breath at birth
+    breath0_tgas: float = 5.0     # gas per breath at birth, measured on testnet
 
 
 @dataclass

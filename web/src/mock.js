@@ -4,7 +4,7 @@ import { BEAT_BLOCKS, NEAR, ONE_TOKEN } from "./config.js";
 
 const RULES = {
   base_price: (NEAR / 1_000_000n).toString(), curve_step: "50000000", wage_bps_per_day: 50, blocks_per_day: 144000,
-  doubling_blocks: 1008000, grace_blocks: 36000, min_grace_blocks: 400, bounty_bps: 5000, breath_tgas: 3,
+  doubling_blocks: 1008000, grace_blocks: 36000, min_grace_blocks: 400, bounty_bps: 5000, breath_tgas: 5,
   max_breath_tgas: 990, voice_account: null, voice_bps: 0,
 };
 
@@ -42,7 +42,7 @@ export function mockChain(state) {
         age_blocks: "1600000", old_age_block: String(start + 6_750_000),
         last_breath_block: String(breathing ? now - ((now + 60) % BEAT_BLOCKS) : now - 7_000),
         deadline_block: String(breathing ? now + 9_000 : dead ? now - 900 : now + 5_400),
-        grace_blocks: "12600", breath_tgas: "9", lungs: breathing ? 3 : 0,
+        grace_blocks: "12600", breath_tgas: "15", lungs: breathing ? 3 : 0,
         last_lung: "maya.testnet", breaths: String(4312 + Math.floor((now - start) / BEAT_BLOCKS)),
         streak_blocks: breathing ? "412000" : "0", best_streak_blocks: "612000",
         supply: tokens(312_000_000), bought: tokens(278_000_000), wages: tokens(34_000_000), burned: "0",

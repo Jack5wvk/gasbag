@@ -7,6 +7,8 @@ import { join } from "node:path";
 
 export const NETWORK = process.env.NEAR_NETWORK ?? "testnet";
 export const RPC = process.env.NEAR_RPC ?? `https://rpc.${NETWORK}.fastnear.com`;
+// Public RPCs rate-limit, so reads fall back to a second endpoint.
+const FALLBACK = NETWORK === "testnet" ? "https://test.rpc.fastnear.com" : "https://free.rpc.fastnear.com";
 export const EXPLORER = NETWORK === "mainnet" ? "https://nearblocks.io" : "https://testnet.nearblocks.io";
 export const BEAT = 200;
 export const TGAS = 1_000_000_000_000n;
@@ -29,15 +31,24 @@ export function argv() {
 }
 
 export async function rpc(method, params) {
-  const response = await fetch(RPC, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: "gasbag", method, params }),
-  });
-  const body = await response.json();
-  if (body.error) throw new Error(JSON.stringify(body.error));
-  if (body.result?.error) throw new Error(body.result.error);
-  return body.result;
+  let lastError;
+  for (const url of [RPC, FALLBACK, RPC]) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: "gasbag", method, params }),
+      });
+      const body = await response.json();
+      if (body.error) throw new Error(JSON.stringify(body.error));
+      if (body.result?.error) throw new Error(body.result.error);
+      return body.result;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+  }
+  throw lastError;
 }
 
 export async function view(contract, method, args = {}) {

@@ -6,7 +6,9 @@
 //! time for as long as the gas lasts. Nothing runs off chain.
 //!
 //! The target sees the pacemaker as its caller, so it can allow-list this one account instead of
-//! a keeper's key. When the gas runs out, anyone can top the job up with `fuel`.
+//! a keeper's key. That trust is why a job can only be registered by the target itself or by its
+//! parent account: otherwise anyone could call a trusting contract through the pacemaker. When the
+//! gas runs out, anyone can restart a stopped job with `fuel`.
 
 use near_heartbeat as heartbeat;
 use near_sdk::json_types::Base64VecU8;
@@ -76,6 +78,11 @@ impl Pacemaker {
         );
         require!(args.0.len() <= MAX_ARGS_BYTES, "PACEMAKER[ARGS] args are capped at 1 KB");
         let owner = env::predecessor_account_id();
+        require!(
+            target == owner || target.is_sub_account_of(&owner),
+            "PACEMAKER[TARGET] only a contract or its parent account can schedule calls to it"
+        );
+        require!(target != env::current_account_id(), "PACEMAKER[TARGET] a job can't target the pacemaker");
         let attached = env::attached_deposit();
         let id = self.next_job;
         self.next_job += 1;
@@ -112,13 +119,19 @@ impl Pacemaker {
         id
     }
 
-    /// Starts a fresh chain for a job, on the gas of this call. Anyone can pay. A chain still
-    /// running stops at its next beat and refunds its own signer.
+    /// Starts a fresh chain for a job, on the gas of this call. Anyone can restart a job that has
+    /// stopped, but only its owner can replace a chain that is still running, so a stranger can't
+    /// kill a funded chain with a cheap one.
     pub fn fuel(&mut self, id: u64) {
+        let now = env::block_height();
+        let caller = env::predecessor_account_id();
         let Some(job) = self.jobs.get_mut(&id) else {
             env::panic_str("PACEMAKER[JOB] no such job");
         };
+        let stopped = now > job.last_beat_block + 2 * heartbeat::BEAT_BLOCKS;
+        require!(stopped || caller == job.owner, "PACEMAKER[RUNNING] that job is still running");
         job.chain += 1;
+        job.last_beat_block = now;
         let chain = job.chain;
         heartbeat::arm("on_beat", Self::beat_args(id, chain));
     }
@@ -200,7 +213,7 @@ mod tests {
         at("owner.testnet", FEE, 300);
         let mut p = Pacemaker::new();
         let id = p.schedule(
-            "target.testnet".parse().unwrap(),
+            "target.owner.testnet".parse().unwrap(),
             "tick".into(),
             Base64VecU8(b"{}".to_vec()),
             every,
@@ -224,7 +237,39 @@ mod tests {
     fn scheduling_without_storage_fails() {
         at("owner.testnet", 0, 300);
         let mut p = Pacemaker::new();
-        p.schedule("target.testnet".parse().unwrap(), "tick".into(), Base64VecU8(vec![]), 1, 30);
+        p.schedule("owner.testnet".parse().unwrap(), "tick".into(), Base64VecU8(vec![]), 1, 30);
+    }
+
+    #[test]
+    #[should_panic(expected = "PACEMAKER[TARGET] only a contract or its parent")]
+    fn a_stranger_cant_schedule_calls_to_someone_elses_contract() {
+        at("attacker.testnet", FEE, 300);
+        let mut p = Pacemaker::new();
+        p.schedule("victim.testnet".parse().unwrap(), "set_owner".into(), Base64VecU8(vec![]), 1, 30);
+    }
+
+    #[test]
+    fn a_contract_can_schedule_its_own_calls() {
+        at("target.testnet", FEE, 300);
+        let mut p = Pacemaker::new();
+        let id = p.schedule("target.testnet".parse().unwrap(), "tick".into(), Base64VecU8(vec![]), 1, 30);
+        assert!(p.job(id).is_some());
+    }
+
+    #[test]
+    #[should_panic(expected = "PACEMAKER[TARGET] a job can't target the pacemaker")]
+    fn a_job_cant_target_the_pacemaker_itself() {
+        // The parent of the pacemaker's account passes the ownership check, so this needs its own.
+        testing_env!(
+            VMContextBuilder::new()
+                .current_account_id("pacemaker.owner.testnet".parse().unwrap())
+                .predecessor_account_id("owner.testnet".parse().unwrap())
+                .attached_deposit(NearToken::from_yoctonear(FEE))
+                .prepaid_gas(Gas::from_tgas(300))
+                .build()
+        );
+        let mut p = Pacemaker::new();
+        p.schedule("pacemaker.owner.testnet".parse().unwrap(), "on_beat".into(), Base64VecU8(vec![]), 1, 30);
     }
 
     #[test]
@@ -256,9 +301,9 @@ mod tests {
     }
 
     #[test]
-    fn an_old_chain_stops_once_refuelled() {
+    fn an_old_chain_stops_once_its_owner_refuels() {
         let (mut p, id) = with_job(1);
-        at("anyone.testnet", 0, 300);
+        at("owner.testnet", 0, 300);
         p.fuel(id);
         at("pacemaker.testnet", 0, 500);
         p.on_beat(id, 1);
@@ -266,6 +311,30 @@ mod tests {
         at("pacemaker.testnet", 0, 500);
         p.on_beat(id, 2);
         assert_eq!(p.job(id).unwrap().beats, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "PACEMAKER[RUNNING]")]
+    fn a_stranger_cant_replace_a_running_chain() {
+        let (mut p, id) = with_job(1);
+        at("griefer.testnet", 0, 3);
+        p.fuel(id);
+    }
+
+    #[test]
+    fn anyone_can_restart_a_stopped_job() {
+        let (mut p, id) = with_job(1);
+        let stopped_at = p.job(id).unwrap().last_beat_block + 2 * heartbeat::BEAT_BLOCKS + 1;
+        testing_env!(
+            VMContextBuilder::new()
+                .current_account_id("pacemaker.testnet".parse().unwrap())
+                .predecessor_account_id("helper.testnet".parse().unwrap())
+                .block_height(stopped_at)
+                .prepaid_gas(Gas::from_tgas(300))
+                .build()
+        );
+        p.fuel(id);
+        assert_eq!(p.job(id).unwrap().chain, 2);
     }
 
     #[test]
