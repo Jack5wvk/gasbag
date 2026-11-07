@@ -1,0 +1,26 @@
+name: caretaker
+
+# An optional volunteer. It keeps the coin fuelled through judging using ordinary testnet accounts
+# with no special powers. To turn it on, set the repository variables CARETAKER_ON=true,
+# CARETAKER_COIN and CARETAKER_NURSES, and the secret CARETAKER_KEYS. If it stops, the coin simply
+# lives or dies by its own rules.
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+jobs:
+  fuel:
+    if: ${{ vars.CARETAKER_ON == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: node scripts/caretaker.mjs "$COIN" --as "$NURSES" --hours 3
+        env:
+          COIN: ${{ vars.CARETAKER_COIN }}
+          NURSES: ${{ vars.CARETAKER_NURSES }}
+          CARETAKER_KEYS: ${{ secrets.CARETAKER_KEYS }}
