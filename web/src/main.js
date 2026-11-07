@@ -1,9 +1,9 @@
 import "./style.css";
-import { BEAT_BLOCKS, EXPLORER, GAS_PRICE_NEAR_PER_TGAS, HATCHERY, MAIN_COIN, MAX_TX_TGAS, NEAR, ONE_TOKEN, SECONDS_PER_BLOCK } from "./config.js";
+import { BEAT_BLOCKS, EXPLORER, GAS_PRICE_NEAR_PER_TGAS, HATCHERY, HELD_PER_TGAS, MAIN_COIN, MAX_TX_TGAS, NEAR, ONE_TOKEN, SECONDS_PER_BLOCK, STORAGE_PRICE_PER_BYTE } from "./config.js";
 import { liveChain } from "./chain.js";
 import { mockChain } from "./mock.js";
 import { drawEcg } from "./ecg.js";
-import { breathsLeft, clock, compact, nearText, parseNear, shortAccount, spanText, tokenText, tokensFor } from "./format.js";
+import { breathAt, breathsLeft, clock, compact, nearText, parseNear, shortAccount, spanText, tokenText, tokensFor } from "./format.js";
 import { line } from "./lines.js";
 import { petMarkup, puff, setPet } from "./pet.js";
 
@@ -19,7 +19,11 @@ const set = (id, value) => { $(id).textContent = value; };
 let vitals = null;
 let lungs = [];
 let rules = null;
+let coinName = "Gasbag";
 let account = null;
+let myLung = null;
+let registered = false;
+let storageFee = 0n;
 let wallet = null;
 let shownBreaths = null;
 let fetchedAt = 0;
@@ -85,7 +89,9 @@ function renderVitals(v) {
   const status = $("status");
   status.dataset.state = v.status;
   status.textContent = words[v.status] ?? v.status;
+  document.title = v.status === "dead" ? `${coinName} (dead)` : coinName;
   set("lung-count", String(v.lungs));
+  set("lungs-empty", v.status === "dead" ? "Nobody. It's gone." : "Nobody. It is holding its breath.");
   set("breath-gas", `${v.breath_tgas} TGas`);
   set("age", spanText(v.age_blocks));
   const breathsLeft = bestFuelBreaths();
@@ -107,13 +113,19 @@ function renderVitals(v) {
   set("lung-cost", `${(MAX_TX_TGAS * GAS_PRICE_NEAR_PER_TGAS).toFixed(2)} NEAR`);
   set("lung-wage", `your share of ${(Number(rules?.wage_bps_per_day ?? 0) / 100).toFixed(2)}% a day`);
 
-  $("ignite").disabled = v.status === "dead";
+  syncIgnite();
   $("buy").disabled = v.status === "dead";
   $("claim").disabled = v.status !== "dead";
   $("claim").textContent = v.status === "dead" ? "Claim your share" : "Opens at death";
-  $("speech").textContent = line(fullness() < 0.25 && v.status === "breathing" ? "worried" : v.status, shortAccount(v.last_lung, 20));
+  const mood = fullness() < 0.25 && v.status === "breathing" ? "worried" : v.status;
+  $("speech").textContent = (mood === "breathing" && spoken) || line(mood, shortAccount(v.last_lung, 20));
   updateBuy();
   setPet($("pet"), v.status, fullness());
+}
+
+function syncIgnite() {
+  $("ignite").disabled = vitals?.status === "dead" || Boolean(myLung);
+  $("ignite").textContent = myLung ? "Your lung is running" : "Start a lung";
 }
 
 function renderLungs(list) {
@@ -241,9 +253,15 @@ function renderRules(r) {
   }
 }
 
+// A first purchase pays for the buyer's storage out of the amount sent.
+function afterFee(spend) {
+  if (registered) return spend;
+  return spend > storageFee ? spend - storageFee : 0n;
+}
+
 function updateBuy() {
   if (!vitals || !rules) return;
-  const spend = parseNear($("buy-near").value);
+  const spend = afterFee(parseNear($("buy-near").value));
   set("buy-price", `${nearText(BigInt(vitals.price) * 1_000_000n, 3)} NEAR per 1M`);
   if (spend <= 0n) {
     set("buy-out", "--");
@@ -262,13 +280,20 @@ async function renderUser() {
     set("my-share", "--");
     set("my-payout", "--");
     $("my-lung").hidden = true;
+    myLung = null;
+    registered = false;
+    syncIgnite();
+    updateBuy();
     return;
   }
-  const [balance, payout, lung] = await Promise.all([
+  const [balance, payout, lung, storage] = await Promise.all([
     chain.view(coin, "ft_balance_of", { account_id: account }),
     chain.view(coin, "payout_of", { account_id: account }),
     chain.view(coin, "lung_of", { account_id: account }).catch(() => null),
+    chain.view(coin, "storage_balance_of", { account_id: account }).catch(() => null),
   ]);
+  registered = Boolean(storage);
+  updateBuy();
   set("my-bag", `${tokenText(balance)} GASBAG`);
   const share = BigInt(vitals.supply) > 0n ? Number((BigInt(balance) * 100000n) / BigInt(vitals.supply)) / 1000 : 0;
   set("my-share", `${share.toFixed(3)}%`);
@@ -276,50 +301,63 @@ async function renderUser() {
   const box = $("my-lung");
   box.hidden = !lung;
   if (lung) box.textContent = `Your lung: ${lung.breaths} breaths, ${lung.fuel_tgas} TGas left.`;
-  $("ignite").disabled = vitals.status === "dead" || Boolean(lung);
-  $("ignite").textContent = lung ? "Your lung is running" : "Start a lung";
+  myLung = lung;
+  syncIgnite();
 }
 
 let lastLog = [];
 let polls = 0;
+let spoken = "";
 
 // Public RPCs rate-limit, so only the vitals are read every time. The heavier reads wait until
 // something has changed, or for a periodic catch-up.
+async function readChain() {
+  const v = await chain.view(coin, "vitals");
+  const changed = !vitals || v.breaths !== vitals.breaths || v.lungs !== vitals.lungs || v.supply !== vitals.supply || v.status !== vitals.status;
+  polls += 1;
+  if (!changed && polls % 5 !== 0) return { v, changed };
+  const [freshLungs, log] = await Promise.all([chain.view(coin, "lungs", {}), chain.view(coin, "log", { limit: 128 })]);
+  return { v, changed, freshLungs, log };
+}
+
 async function refresh() {
+  let reading;
   try {
-    const v = await chain.view(coin, "vitals");
-    const changed = !vitals || v.breaths !== vitals.breaths || v.lungs !== vitals.lungs || v.supply !== vitals.supply || v.status !== vitals.status;
-    polls += 1;
-    if (changed || polls % 5 === 0) {
-      const [l, log] = await Promise.all([chain.view(coin, "lungs", {}), chain.view(coin, "log", { limit: 128 })]);
-      lungs = l;
-      lastLog = log;
-      renderLungs(l);
-      renderLog(log);
-      chain.view(coin, "speech", { limit: 1 }).then((speech) => {
-        if (speech.length) $("speech").textContent = speech[0].text;
-      }).catch(() => {});
-    }
-    fetchedAt = Date.now();
-    vitals = v;
-    $("notice").hidden = true;
-    if (shownBreaths !== null && v.breaths !== shownBreaths) puff($("pet"));
-    shownBreaths = v.breaths;
-    renderVitals(v);
-    const beats = lastLog.filter((e) => e.kind === "Wage" || e.kind === "Bounty" || e.kind === "Ignite");
-    drawEcg($("ecg"), { block: Number(v.block), beats, status: v.status });
-    if (changed) renderUser().catch(() => {});
-    tick();
+    reading = await readChain();
   } catch (error) {
     const box = $("notice");
     box.hidden = false;
     box.textContent = String(error.message ?? error).includes("does not exist") || String(error).includes("UNKNOWN_ACCOUNT")
       ? `${coin} isn't on ${chain.live ? "testnet" : "this preview"} yet.`
       : "Can't reach the chain right now. Retrying.";
+    return;
   }
+  // Everything from here runs on data already in hand, so a fault is a bug in this page. It goes to
+  // the console instead of being reported as a network problem.
+  const { v, changed, freshLungs, log } = reading;
+  fetchedAt = Date.now();
+  vitals = v;
+  $("notice").hidden = true;
+  if (freshLungs) {
+    lungs = freshLungs;
+    lastLog = log;
+    renderLungs(lungs);
+    renderLog(lastLog);
+    chain.view(coin, "speech", { limit: 1 }).then((speech) => {
+      if (speech.length) spoken = speech[0].text;
+    }).catch(() => {});
+  }
+  if (shownBreaths !== null && v.breaths !== shownBreaths) puff($("pet"));
+  shownBreaths = v.breaths;
+  renderVitals(v);
+  const beats = lastLog.filter((e) => e.kind === "Wage" || e.kind === "Bounty" || e.kind === "Ignite");
+  drawEcg($("ecg"), { block: Number(v.block), beats, status: v.status });
+  if (changed) renderUser().catch(() => {});
+  tick();
 }
 
 async function refreshSlow() {
+  if (!rules || !storageFee) await loadOnce();
   try {
     renderDays(await chain.view(coin, "days", {}));
   } catch { /* the fast loop reports connection trouble */ }
@@ -355,15 +393,17 @@ async function loadOnce() {
   try {
     rules = await chain.view(coin, "rules");
     renderRules(rules);
+    storageFee = BigInt((await chain.view(coin, "storage_balance_bounds")).min);
     const id = await chain.view(coin, "identity");
     set("patient-name", id.name);
-    document.title = `${id.name} ${vitals?.status === "dead" ? "(dead)" : ""}`.trim();
+    coinName = id.name;
+    document.title = coinName;
     set("soul", id.soul);
     const [keys, info] = await Promise.all([chain.keys(coin), chain.account(coin)]);
     set("proof-keys", keys.length === 0 ? "No access keys. Nobody can change this contract." : `${keys.length} access key(s) still on this account.`);
     $("proof-keys").closest("li").classList.toggle("fail", keys.length > 0);
     set("proof-code", `Code hash ${info.code_hash}`);
-  } catch { /* retried on the next reload; the notice covers connection trouble */ }
+  } catch { /* the slow loop tries again; the notice covers connection trouble */ }
 }
 
 async function needWallet() {
@@ -403,20 +443,47 @@ guarded($("buy"), async () => {
   if (!(await needWallet())) return;
   const spend = parseNear($("buy-near").value);
   if (spend <= 0n) return toast("Enter how much NEAR to spend.");
-  const expected = tokensFor(spend, vitals.bought, rules);
+  registered = Boolean(await chain.view(coin, "storage_balance_of", { account_id: account }));
+  const net = afterFee(spend);
+  if (net <= 0n) return toast(`A first purchase has to cover the ${nearText(storageFee, 3)} NEAR storage fee.`);
+  const expected = tokensFor(net, vitals.bought, rules);
   await wallet.send(coin, "buy", { min_tokens: ((expected * 97n) / 100n).toString() }, 60, spend);
   toast("Bought. It's in your bag.");
 });
 
+// A lung can only carry the gas its owner can hold for it, so a small wallet gets a small lung.
+// Some NEAR stays free, because a buy or claim also holds gas while it runs.
+const KEEP_FREE = NEAR / 10n;
+
+async function affordableLung() {
+  const info = await chain.account(account);
+  const free = BigInt(info.amount) - BigInt(info.storage_usage) * STORAGE_PRICE_PER_BYTE - KEEP_FREE;
+  return free > 0n ? Math.min(MAX_TX_TGAS, Number(free / HELD_PER_TGAS)) : 0;
+}
+
+async function waitForLung() {
+  for (let tries = 0; tries < 8; tries += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const lung = await chain.view(coin, "lung_of", { account_id: account }).catch(() => null);
+    if (lung) return lung;
+  }
+  return null;
+}
+
 guarded($("ignite"), async () => {
   if (!(await needWallet())) return;
-  const registered = await chain.view(coin, "storage_balance_of", { account_id: account });
-  if (!registered) {
+  const tgas = await affordableLung();
+  const need = Math.ceil(breathAt(Number(vitals.age_blocks) + BEAT_BLOCKS, rules)) + 6;
+  if (tgas < need) return toast(`A lung at this age needs ${need} TGas, so keep about ${nearText(BigInt(need) * HELD_PER_TGAS + KEEP_FREE, 3)} NEAR free.`);
+  if (!(await chain.view(coin, "storage_balance_of", { account_id: account }))) {
     const bounds = await chain.view(coin, "storage_balance_bounds");
     await wallet.send(coin, "storage_deposit", {}, 30, BigInt(bounds.min));
   }
-  const hash = await wallet.ignite(account, coin);
-  toast("Lung started. Its first breath comes in about 2 minutes.", hash ? `${EXPLORER}/txns/${hash}` : undefined);
+  const hash = await wallet.ignite(account, coin, tgas);
+  const link = hash ? `${EXPLORER}/txns/${hash}` : undefined;
+  if (!(await waitForLung())) return toast("The lung hasn't appeared. Check the transaction.", link);
+  const size = tgas < MAX_TX_TGAS ? ` Your balance had room for ${tgas} TGas.` : "";
+  toast(`Lung started.${size} Its first breath comes in about 2 minutes.`, link);
 });
 
 guarded($("claim"), async () => {

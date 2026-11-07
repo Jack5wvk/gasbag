@@ -63,12 +63,20 @@ function readSession(accountId, coin) {
   }
 }
 
-export const hasSession = (accountId, coin) => Boolean(readSession(accountId, coin));
+function writeSession(accountId, coin, secret) {
+  try {
+    if (secret) localStorage.setItem(sessionName(accountId, coin), secret);
+    else localStorage.removeItem(sessionName(accountId, coin));
+  } catch {
+    // Without storage the key lasts for this one lung, and the next lung asks the wallet again.
+  }
+}
 
 async function authorise(accountId, coin) {
   const pair = KeyPair.fromRandom("ed25519");
   const wallet = await connector.wallet();
   await wallet.signAndSendTransaction({
+    signerId: accountId,
     receiverId: accountId,
     actions: [
       {
@@ -80,19 +88,44 @@ async function authorise(accountId, coin) {
       },
     ],
   });
-  localStorage.setItem(sessionName(accountId, coin), pair.toString());
+  writeSession(accountId, coin, pair.toString());
   return pair.toString();
 }
 
-/** Starts a lung with the most gas a transaction can carry, and returns once it is included. */
-export async function ignite(accountId, coin) {
-  const secret = readSession(accountId, coin) ?? (await authorise(accountId, coin));
-  const account = new Account(accountId, new JsonRpcProvider({ url: RPC_URLS[0] }), secret);
-  const result = await account.signAndSendTransaction({
-    receiverId: coin,
-    actions: [actions.functionCall("ignite", {}, BigInt(MAX_TX_TGAS) * TGAS, 0n)],
-    waitUntil: "INCLUDED",
-    throwOnFailure: false,
-  });
-  return result.transaction?.hash ?? null;
+// Public RPCs rate-limit, so a busy endpoint moves on to the next one. Anything else is a real
+// answer from the chain. A repeat can't start a second lung, because each account gets one.
+async function startLung(accountId, coin, secret, tgas) {
+  let lastError;
+  for (const url of RPC_URLS) {
+    const account = new Account(accountId, new JsonRpcProvider({ url }), secret);
+    try {
+      return await account.signAndSendTransaction({
+        receiverId: coin,
+        actions: [actions.functionCall("ignite", {}, BigInt(tgas) * TGAS, 0n)],
+        waitUntil: "INCLUDED",
+        throwOnFailure: false,
+      });
+    } catch (error) {
+      lastError = error;
+      if (!/rate limit|-429|failed to fetch|network|timed? ?out/i.test(String(error.message ?? error))) throw error;
+    }
+  }
+  throw lastError;
+}
+
+/** Starts a lung and returns once it is included. Inclusion doesn't mean the contract accepted it. */
+export async function ignite(accountId, coin, tgas = MAX_TX_TGAS) {
+  const saved = readSession(accountId, coin);
+  if (saved) {
+    try {
+      return (await startLung(accountId, coin, saved, tgas)).transaction?.hash ?? null;
+    } catch (error) {
+      // Each lung burns a little of the allowance, and a key can be removed from the wallet. Either
+      // way the saved key can't sign, so it is replaced below.
+      if (!/allowance|does not exist/i.test(String(error.message ?? error))) throw error;
+      writeSession(accountId, coin, null);
+    }
+  }
+  const secret = await authorise(accountId, coin);
+  return (await startLung(accountId, coin, secret, tgas)).transaction?.hash ?? null;
 }

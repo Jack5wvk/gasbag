@@ -79,10 +79,13 @@ These are real transactions on NEAR testnet, from coins deliberately run to the 
 | Death by old age | Dead at age 1,512 blocks against a limit of 1,510, and a later `buy` failed with `GASBAG[DEAD]` | Same coin, `death()` before it was retired |
 | The will | All 328,602 tokens burned and the whole 0.295 NEAR estate paid out. A second claim failed with `GASBAG[NOTHING]` | [`H5vojYBv…`](https://testnet.nearblocks.io/txns/H5vojYBv4jeTE79wYLiAHFPwhm1NqVu2zSduN9CYGRN) |
 | The pacemaker refuses a stranger | `PACEMAKER[TARGET] only a contract or its parent account can schedule calls to it` | [`9Bt4scQC…`](https://testnet.nearblocks.io/txns/9Bt4scQCag3UcYjEyJrWyEgNJSndyoLvEsU647L4RLbw) |
+| A limited session key | Refused `claim` and a transfer, then started a lung and returned in 1.5 seconds | [`CfBWs9SR…`](https://testnet.nearblocks.io/txns/CfBWs9SRQjXc4HmnPMvRpZWVJrkhzDppaZPbj3eJ69ur) |
+| The caretaker and a flatline | A coin ran out of fuel, `caretaker.mjs` started a new lung, and when that ran out too the coin flatlined | [`Gg7Si1Uf…`](https://testnet.nearblocks.io/txns/Gg7Si1UfGX57jcTt2avW6UaY5ofLcsf4TKs86ukezYAL) |
+| The page's buttons | Connect, buy, start a lung, claim and disconnect, all pressed on the page, with a local stand-in signing in place of a wallet app | [lung `BnwSzyVU…`](https://testnet.nearblocks.io/txns/BnwSzyVUgUKzsLV5G93rhECcGuKkrutPDsmLKhuYac8n), [claim `BNndtqed…`](https://testnet.nearblocks.io/txns/BNndtqedEP8nhZfDFcQzQxH7PoEGx5mmju36T9Xf2usb) |
 
 Live contract: [`pacemaker.gasbag-hq.testnet`](https://testnet.nearblocks.io/address/pacemaker.gasbag-hq.testnet), with no access keys.
 
-Measured on testnet: a breath costs 5.0 to 5.3 TGas in total at birth, and beats landed exactly 201 blocks apart. Prepaid gas is bought at 0.001 NEAR per TGas and burned at 0.0001, and each breath refunds the difference, so a full lung needs about 1 NEAR held up front but burns about 0.1.
+Measured on testnet: a breath costs 5.0 to 5.3 TGas in total at birth, and beats landed exactly 201 blocks apart. Prepaid gas is bought at 0.001 NEAR per TGas and burned at 0.0001, and each breath refunds the difference, so a full lung needs about 1 NEAR held up front but burns about 0.1. The page sizes each lung to what the wallet can hold, and leaves 0.1 NEAR free.
 
 ## Against the track's requirements
 
@@ -101,7 +104,7 @@ This couldn't be built the same way on Ethereum or Solana, where a contract can'
 - **Yield timeouts ([NEP-519](https://github.com/near/NEPs/blob/master/neps/nep-0519.md)).** A yielded promise nobody resumes fires by itself after 200 blocks. The callback yields again and forwards its gas, so one transaction becomes a timed chain.
 - **1,000 TGas transactions.** At protocol 88 one transaction can carry 1 PGas, which is what lets a lung last hours.
 - **Keyless accounts.** The coin's account has no access keys, so "nobody can change this" is something you can check.
-- **Function-call keys.** A lung's transaction stays open for hours, and a client that waits for it gets a 408 timeout after 30 seconds, even though the lung is fine. So the page uses a small key that can only call `ignite`, and submits without waiting. On testnet that key was refused for `claim` and for a transfer.
+- **Function-call keys.** A lung's transaction stays open for hours, and a client that waits for it gets a 408 timeout after 30 seconds, even though the lung is fine. So the page uses a small key that can only call `ignite`, and submits without waiting. On testnet that key was refused for `claim` and for a transfer, and it started a lung in 1.5 seconds. When a key's allowance runs down, the page asks the wallet for a new one.
 - **Live state in metadata.** `ft_metadata` returns an icon that follows the coin's state, so a wallet that reads it live sees it die.
 
 ## What it gives NEAR
@@ -142,6 +145,8 @@ Buyer columns show NEAR received at death per NEAR paid, holding to the end.
 - **Nothing can upgrade it.** A bug can't be patched on a keyless coin. A new coin would have to be launched instead.
 - **The voice account is a real role.** If a voice is set at launch, that one account can post lines and draw its 1% budget. It can't touch the estate or the rules.
 - **On-chain randomness isn't used**, so there is nothing for a validator to bias.
+- **Not yet run with a wallet app.** The page's buttons were tested with a local stand-in that signs the same transactions. A real wallet's own screens haven't been tried.
+- **The hatchery isn't live yet.** It passes its unit tests but hasn't been deployed, so **Hatch a coin** won't work until it is.
 - **Reviewed, not audited.** An independent review of the code found a critical impersonation flaw and a griefing path in the pacemaker, and smaller issues elsewhere. All are fixed, with a test for each. It wasn't a professional audit.
 
 ## Repository
