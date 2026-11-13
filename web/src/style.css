@@ -160,6 +160,7 @@ button.ghost { background: transparent; color: var(--ink); border: 1px solid var
 .lung-eta { font: 400 13px var(--data); color: var(--muted); white-space: nowrap; }
 .meter { height: 8px; border-radius: 4px; background: var(--callout); overflow: hidden; }
 .meter i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+.record .meter { margin-top: 6px; }
 .log-scroll { max-height: 330px; overflow-y: auto; border-block: 1px solid var(--rule); margin-bottom: 8px; }
 .log { border-collapse: collapse; width: 100%; font-size: 14px; }
 .log td { padding: 6px 8px 6px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
@@ -170,6 +171,11 @@ button.ghost { background: transparent; color: var(--ink); border: 1px solid var
 .log .who { overflow-wrap: anywhere; }
 .log .amt { font: 400 13px var(--data); text-align: right; white-space: nowrap; }
 .supply-chart svg { display: block; width: 100%; height: auto; }
+.day-table { margin-top: 18px; }
+.day-table h3 { margin: 0 0 8px; }
+.days th { font: 500 12.5px var(--data); color: var(--muted); text-align: right; padding: 6px 8px 6px 0; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+.days th:first-child { text-align: left; }
+.days .total td { font-weight: 700; }
 .grid-line { stroke: var(--rule); stroke-width: 1; }
 .axis-line { stroke: var(--grid-major); stroke-width: 1; }
 .tick { font: 400 12px var(--data); fill: var(--muted); }
@@ -225,4 +231,7 @@ button.ghost { background: transparent; color: var(--ink); border: 1px solid var
   .tag { display: none; }
   .hatch-form { grid-template-columns: minmax(0, 1fr); }
   .hatch-form button { width: 100%; }
+}
+@media (max-width: 420px) {
+  .days th:nth-child(2), .days td:nth-child(2) { display: none; }
 }

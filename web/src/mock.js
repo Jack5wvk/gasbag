@@ -45,7 +45,7 @@ export function mockChain(state) {
         grace_blocks: "12600", breath_tgas: "15", lungs: breathing ? 3 : 0,
         last_lung: "maya.testnet", breaths: String(4312 + Math.floor((now - start) / BEAT_BLOCKS)),
         streak_blocks: breathing ? "412000" : "0", best_streak_blocks: "612000",
-        supply: tokens(312_000_000), bought: tokens(278_000_000), wages: tokens(34_000_000), burned: "0",
+        supply: tokens(312_000_000), bought: tokens(278_000_000), wages: tokens(34_000_000), burned: dead ? tokens(420_000) : "0",
         lost: tokens(2_100_000), rescue_bounty: breathing ? "0" : tokens(184_000),
         estate: (NEAR * 1052n).toString(), estate_left: (NEAR * 1052n).toString(),
         price: (NEAR * 66n / 10_000_000n).toString(), floor: (NEAR * 34n / 10_000_000n).toString(),
@@ -66,8 +66,8 @@ export function mockChain(state) {
       return entries.sort((a, b) => b.block - a.block);
     },
     days: () => Array.from({ length: 12 }, (_, d) => [d, {
-      breaths: 700, bought: tokens(22_000_000), near_in: (NEAR * 80n).toString(), wages: tokens(1_400_000),
-      burned: "0", gas: "2200000000000000", supply_end: tokens(26_000_000 * (d + 1)),
+      breaths: 700, bought: tokens(23_166_667), near_in: (NEAR * 80n).toString(), wages: tokens(2_833_333),
+      burned: dead && d === 11 ? tokens(420_000) : "0", gas: "2200000000000000", supply_end: tokens(26_000_000 * (d + 1)),
     }]),
     coins: () => [
       { coin: "run3.hatchery.gasbag-hq.testnet", hatcher: "tomas.testnet", name: "Tiny Gasbag", symbol: "TINY", block: start - 900 },

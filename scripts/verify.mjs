@@ -74,8 +74,9 @@ check("Curve price is at least the base price", BigInt(vitals.price) >= BigInt(r
 if (BigInt(vitals.wages) === 0n) {
   check("Floor is at least half the price, before wages", BigInt(vitals.floor) * 2n >= BigInt(vitals.price) || vitals.supply === "0");
 } else {
-  const dilution = (BigInt(vitals.bought) * 1000n) / BigInt(vitals.supply);
-  note("Wage dilution so far", `${(1000 - Number(dilution)) / 10}% of supply`);
+  // Measured against everything ever minted, so a coin whose holders have all claimed still works.
+  const minted = BigInt(vitals.bought) + BigInt(vitals.wages);
+  note("Wage dilution so far", `${Number((BigInt(vitals.wages) * 1000n) / minted) / 10}% of all tokens minted`);
 }
 check("The contract holds enough NEAR for the estate", BigInt(info.amount) + BigInt(info.locked) >= BigInt(vitals.estate_left), `${near(vitals.estate_left)} NEAR owed`);
 check("Supply equals bought plus wages minus burned",

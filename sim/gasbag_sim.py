@@ -738,10 +738,53 @@ def fmt(x, digits=2):
     return str(x)
 
 
+def supply_table(path: str) -> str:
+    """The README's supply over time, in millions of tokens, from a saved baseline run."""
+    days = [1, 5, 10, 20, 30, 40, 50]
+    with open(path) as f:
+        data = json.load(f)
+    lines = ["| Scenario | " + " | ".join(f"Day {d}" for d in days) + " |", "|---|" + "---|" * len(days)]
+    for key, info in data["scenarios"].items():
+        life = data["summary"][key]["death_day"]
+        supply = {point["day"]: point["supply"] for point in data["series"][key]}
+        cells = [f"{supply[d] / 1e6:.1f}" if d <= life else "dead" for d in days]
+        lines.append(f"| {info['label']} | " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
+def picks_table(path: str) -> str:
+    """How each launch parameter was chosen: the median outcome at every value tried."""
+    with open(path) as f:
+        rows = json.load(f)["rows"]
+
+    def med(metric: str, knob: str, value: float) -> float:
+        return statistics.median(r[metric] for r in rows if r[knob] == value and r[metric] is not None)
+
+    def series(metric: str, knob: str, values: List[float], form: str = "{:.0f}", scale: float = 1.0) -> str:
+        return ", ".join(form.format(med(metric, knob, v) * scale) for v in values)
+
+    doubling, wage, grace, bounty = SWEEP["doubling_days"], SWEEP["wage_pct_day"], SWEEP["grace_hours"], SWEEP["bounty_share"]
+    return "\n".join([
+        "| Parameter | Values tried | What changed | Picked | Why |",
+        "|---|---|---|---|---|",
+        f"| Doubling time | {', '.join(f'{v:g}' for v in doubling)} days | A steady community lives {series('cult_life', 'doubling_days', doubling)} days | 7 days | Old age lands near day 53, inside the 60 days |",
+        f"| Wage | {', '.join(f'{v:g}' for v in wage)}% a day | Nurses end with {series('hype_wage_share', 'wage_pct_day', wage, scale=100)}% of supply, and the last buyers get ×{series('hype_last10', 'wage_pct_day', wage, '{:.2f}').replace(', ', ', ×')} | 0.5% | Pays nurses without gutting the floor |",
+        f"| Grace at birth | {', '.join(f'{v:g}' for v in grace)} hours | A small community lives {series('small_life', 'grace_hours', grace)} days | 6 hours | One missed shift stays dangerous |",
+        f"| Rescue bounty | {', '.join(f'{v * 100:g}' for v in bounty)}% of missed wages | Pure chicken lives {series('chicken_life', 'bounty_share', bounty)} days | 50% | Rewards a rescue, and neglect still costs the coin |",
+        "| Gas per breath | Not swept | Measured on testnet at 5.0 to 5.3 TGas | 5 TGas | The true cost of a breath |",
+    ])
+
+
 def main(argv: List[str]) -> int:
     mode = argv[1] if len(argv) > 1 else "baseline"
     base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
     os.makedirs(base, exist_ok=True)
+    if mode == "supply":
+        print(supply_table(os.path.join(base, "baseline.json")))
+        return 0
+    if mode == "picks":
+        print(picks_table(os.path.join(base, "sweep.json")))
+        return 0
     if mode == "sweep":
         seeds = int(argv[2]) if len(argv) > 2 else 8
         rows = sweep(seeds)

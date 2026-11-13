@@ -4,6 +4,7 @@ export const RPC_URLS = ["https://test.rpc.fastnear.com", "https://rpc.testnet.f
 export const EXPLORER = "https://testnet.nearblocks.io";
 export const MAIN_COIN = "coin.gasbag-hq.testnet";
 export const HATCHERY = "hatchery.gasbag-hq.testnet";
+export const REPO_URL = "https://github.com/Jack5wvk/gasbag";
 
 export const SECONDS_PER_BLOCK = 0.6;
 export const BEAT_BLOCKS = 200;

@@ -7,7 +7,7 @@ version = "1.0.0"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT"
-repository = "https://github.com/near-hackathon/gasbag"
+repository = "https://github.com/Jack5wvk/gasbag"
 
 [workspace.dependencies]
 near-sdk = "5.30.1"

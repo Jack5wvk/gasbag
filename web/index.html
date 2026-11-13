@@ -11,7 +11,6 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Bagel+Fat+One&family=IBM+Plex+Mono:wght@400;500&display=swap" />
   </head>
   <body>
-    <p id="mock-banner" class="banner" hidden>Simulated preview. None of this is live chain data.</p>
 
     <header class="top">
       <a class="mark" href="./">GASBAG</a>
@@ -98,11 +97,15 @@
       <section class="records" aria-label="Records">
         <div class="record"><span>Breathing streak</span><b id="streak">--</b></div>
         <div class="record high"><span>High score</span><b id="best-streak">--</b></div>
-        <div class="record"><span>Breaths today</span><b id="today-breaths">--</b></div>
         <div class="record"><span>Estate</span><b id="estate">--</b></div>
         <div class="record"><span>Floor per 1M GASBAG</span><b id="floor">--</b></div>
+        <div class="record"><span>Today</span><b id="today-day">--</b><div id="today-meter" class="meter" role="img" aria-label="How far through today"><i></i></div></div>
+        <div class="record"><span>Breaths today</span><b id="today-breaths">--</b></div>
+        <div class="record"><span>Minted today</span><b id="today-minted">--</b></div>
+        <div class="record"><span>Burned today</span><b id="today-burned">--</b></div>
         <div class="record"><span>Supply</span><b id="supply">--</b></div>
         <div class="record"><span>Wages paid</span><b id="wages">--</b></div>
+        <div class="record"><span>GASBAG burned</span><b id="burned-tokens">--</b></div>
         <div class="record"><span>NEAR burned breathing</span><b id="burned-near">--</b></div>
       </section>
 
@@ -115,7 +118,7 @@
         <div>
           <h2>Every mint and burn</h2>
           <div class="log-scroll"><table class="log"><tbody id="log"></tbody></table></div>
-          <p class="note">The contract keeps the latest 128 entries. Older ones stay in its NEP-141 events: <a id="explorer-link" href="#" target="_blank" rel="noopener">open in explorer</a>.</p>
+          <p class="note">The latest 128 entries, kept by the contract. Older ones are counted in the daily table below, and each one stays in its NEP-141 events: <a id="explorer-link" href="#" target="_blank" rel="noopener">open in explorer</a>.</p>
         </div>
       </section>
 
@@ -123,6 +126,18 @@
         <h2>Supply by day</h2>
         <p class="note" id="supply-note">Read from the contract's own daily table.</p>
         <div id="supply-chart" class="supply-chart"></div>
+        <div id="day-table" class="day-table" hidden>
+          <h3>Every day of its life</h3>
+          <div class="log-scroll">
+            <table class="log days">
+              <thead>
+                <tr><th scope="col">Day</th><th scope="col">Breaths</th><th scope="col">Bought</th><th scope="col">Wages</th><th scope="col">Burned</th><th scope="col">Supply</th></tr>
+              </thead>
+              <tbody id="day-rows"></tbody>
+            </table>
+          </div>
+          <p class="note">Every mint and burn the coin has ever made, added up by day from the contract's own table. Bought and wages are minted, and burned is what the will has paid out.</p>
+        </div>
       </section>
 
       <section class="law">

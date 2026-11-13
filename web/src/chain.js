@@ -12,7 +12,8 @@ async function rpc(method, params) {
       });
       if (!response.ok) throw new Error(`RPC ${response.status}`);
       const body = await response.json();
-      if (body.error) throw new Error(body.error.message ?? JSON.stringify(body.error));
+      // `data` says what went wrong, such as an unknown account. `message` is only "Server error".
+      if (body.error) throw new Error(body.error.data ?? body.error.message ?? JSON.stringify(body.error));
       if (body.result?.error) throw new Error(body.result.error);
       return body.result;
     } catch (error) {

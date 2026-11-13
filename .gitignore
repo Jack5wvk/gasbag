@@ -10,4 +10,3 @@ target/
 submission*.json
 # Internal planning notes and competitor research. Not part of the project.
 proposal/
-sim/results/sweep.json

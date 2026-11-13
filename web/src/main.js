@@ -1,15 +1,23 @@
 import "./style.css";
-import { BEAT_BLOCKS, EXPLORER, GAS_PRICE_NEAR_PER_TGAS, HATCHERY, HELD_PER_TGAS, MAIN_COIN, MAX_TX_TGAS, NEAR, ONE_TOKEN, SECONDS_PER_BLOCK, STORAGE_PRICE_PER_BYTE } from "./config.js";
+import { BEAT_BLOCKS, EXPLORER, GAS_PRICE_NEAR_PER_TGAS, HATCHERY, HELD_PER_TGAS, MAIN_COIN, MAX_TX_TGAS, NEAR, ONE_TOKEN, REPO_URL, SECONDS_PER_BLOCK, STORAGE_PRICE_PER_BYTE } from "./config.js";
 import { liveChain } from "./chain.js";
-import { mockChain } from "./mock.js";
 import { drawEcg } from "./ecg.js";
 import { breathAt, breathsLeft, clock, compact, nearText, parseNear, shortAccount, spanText, tokenText, tokensFor } from "./format.js";
 import { line } from "./lines.js";
 import { petMarkup, puff, setPet } from "./pet.js";
 
 const params = new URLSearchParams(location.search);
-const mock = params.get("mock");
-const chain = mock ? mockChain(["breathing", "apnea", "dead"].includes(mock) ? mock : "breathing") : liveChain();
+// Simulated states exist only on a developer's machine. The published page always reads the chain.
+let chain = liveChain();
+if (import.meta.env.DEV && params.get("mock")) {
+  const { mockChain } = await import("./mock.js");
+  const state = params.get("mock");
+  chain = mockChain(["breathing", "apnea", "dead"].includes(state) ? state : "breathing");
+  const label = document.createElement("p");
+  label.className = "banner";
+  label.textContent = "Simulated preview. None of this is live chain data.";
+  document.body.prepend(label);
+}
 const requested = params.get("coin");
 const coin = requested && /^[a-z0-9._-]{2,64}$/.test(requested) ? requested : MAIN_COIN;
 
@@ -29,10 +37,9 @@ let shownBreaths = null;
 let fetchedAt = 0;
 
 $("pet").innerHTML = petMarkup;
-$("mock-banner").hidden = chain.live;
 set("coin-id", coin);
 $("explorer-link").href = `${EXPLORER}/address/${coin}`;
-set("cmd-verify", `git clone <this repo> && cd gasbag && npm install\nnode scripts/verify.mjs ${coin}\nnode scripts/status.mjs ${coin}`);
+set("cmd-verify", `${REPO_URL ? `git clone ${REPO_URL} && cd gasbag && npm install\n` : ""}node scripts/verify.mjs ${coin}\nnode scripts/status.mjs ${coin}`);
 
 function toast(message, href) {
   const box = $("toast");
@@ -107,6 +114,7 @@ function renderVitals(v) {
   set("floor", `${nearText(BigInt(v.floor) * 1_000_000n, 3)} NEAR`);
   set("supply", tokenText(v.supply));
   set("wages", tokenText(v.wages));
+  set("burned-tokens", tokenText(v.burned));
   set("burned-near", nearText(BigInt(v.gas_burned) * BigInt(Math.round(GAS_PRICE_NEAR_PER_TGAS * 1e12)), 4));
 
   set("lung-life", spanText(breathsFor(MAX_TX_TGAS) * BEAT_BLOCKS));
@@ -182,10 +190,57 @@ function renderLog(entries) {
   }
 }
 
+function renderToday(rows) {
+  const perDay = Number(rules?.blocks_per_day ?? 144000);
+  const age = vitals ? Number(vitals.age_blocks) : 0;
+  const today = Math.floor(age / perDay);
+  const row = rows.find(([d]) => d === today)?.[1];
+  const alive = vitals?.status !== "dead";
+  const through = alive ? Math.round(((age % perDay) / perDay) * 100) : 0;
+  const meter = $("today-meter");
+  set("today-day", alive ? `Day ${today + 1}` : "Over");
+  meter.hidden = !alive;
+  meter.setAttribute("aria-label", `${through}% of today has passed`);
+  meter.firstElementChild.style.width = `${through}%`;
+  set("today-breaths", row ? String(row.breaths) : "0");
+  set("today-minted", row ? tokenText(BigInt(row.bought) + BigInt(row.wages)) : "0");
+  set("today-burned", row ? tokenText(row.burned) : "0");
+}
+
+function dayRow(label, cells, className) {
+  const row = document.createElement("tr");
+  if (className) row.className = className;
+  const day = document.createElement("td");
+  day.className = "kind";
+  day.textContent = label;
+  row.appendChild(day);
+  for (const text of cells) {
+    const cell = document.createElement("td");
+    cell.className = "amt";
+    cell.textContent = text;
+    row.appendChild(cell);
+  }
+  return row;
+}
+
+// The on-chain log only keeps the latest entries, but this table covers every day the coin has lived.
+function renderDayTable(rows) {
+  const body = $("day-rows");
+  body.replaceChildren();
+  $("day-table").hidden = rows.length === 0;
+  if (!rows.length) return;
+  const total = (key) => rows.reduce((sum, [, d]) => sum + BigInt(d[key]), 0n);
+  const breaths = rows.reduce((sum, [, d]) => sum + d.breaths, 0);
+  const latest = rows[rows.length - 1][1];
+  body.appendChild(dayRow("All days", [compact(breaths), tokenText(total("bought")), tokenText(total("wages")), tokenText(total("burned")), tokenText(latest.supply_end)], "total"));
+  for (const [day, d] of [...rows].reverse()) {
+    body.appendChild(dayRow(`Day ${day + 1}`, [compact(d.breaths), tokenText(d.bought), tokenText(d.wages), tokenText(d.burned), tokenText(d.supply_end)]));
+  }
+}
+
 function renderDays(rows) {
-  const today = vitals ? Math.floor(Number(vitals.age_blocks) / (rules?.blocks_per_day ?? 144000)) : 0;
-  const todayRow = rows.find(([d]) => d === today);
-  set("today-breaths", todayRow ? String(todayRow[1].breaths) : "0");
+  renderToday(rows);
+  renderDayTable(rows);
 
   const host = $("supply-chart");
   host.replaceChildren();
@@ -328,7 +383,7 @@ async function refresh() {
     const box = $("notice");
     box.hidden = false;
     box.textContent = String(error.message ?? error).includes("does not exist") || String(error).includes("UNKNOWN_ACCOUNT")
-      ? `${coin} isn't on ${chain.live ? "testnet" : "this preview"} yet.`
+      ? `${coin} isn't on testnet yet.`
       : "Can't reach the chain right now. Retrying.";
     return;
   }
@@ -418,7 +473,7 @@ async function needWallet() {
 function guarded(button, action) {
   button.addEventListener("click", async (event) => {
     event.preventDefault();
-    if (!chain.live) return toast("This is a simulated preview. Open the live page to act.");
+    if (import.meta.env.DEV && !chain.live) return toast("This is a simulated preview. Open the live page to act.");
     try {
       button.disabled = true;
       await action();
@@ -496,7 +551,7 @@ $("buy-near").addEventListener("input", updateBuy);
 
 $("hatch-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!chain.live) return toast("This is a simulated preview. Open the live page to act.");
+  if (import.meta.env.DEV && !chain.live) return toast("This is a simulated preview. Open the live page to act.");
   const label = $("hatch-label").value.trim();
   if (!/^[a-z0-9-]{1,24}$/.test(label)) return toast("Use up to 24 lowercase letters, digits and hyphens.");
   try {
